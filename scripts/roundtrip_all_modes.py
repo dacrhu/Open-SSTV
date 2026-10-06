@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Round-trip encode→decode audit for all 17 supported SSTV modes.
+"""Round-trip encode→decode audit for every mode in ``MODE_TABLE``.
 
 For each mode:
   1. Creates a synthetic test image at the mode's native resolution.
@@ -63,7 +63,11 @@ def make_test_image(width: int, height: int) -> Image.Image:
     # Diagonal grey stripe so the image has high-frequency structure
     for i in range(min(width, height)):
         arr[i, i, :] = 200
-    return Image.fromarray(arr, mode="RGB")
+    # No mode= argument: Pillow deprecated it (removed in Pillow 13), and a
+    # uint8 (H, W, 3) array is inferred as RGB anyway.
+    img = Image.fromarray(arr)
+    assert img.mode == "RGB", img.mode
+    return img
 
 
 def encode_to_wav_bytes(image: Image.Image, mode: Mode) -> bytes:
@@ -186,15 +190,12 @@ def audit_mode(mode: Mode) -> Result:
 
 
 def main() -> None:
-    modes_in_order = [
-        Mode.ROBOT_36,
-        Mode.MARTIN_M1, Mode.MARTIN_M2,
-        Mode.SCOTTIE_S1, Mode.SCOTTIE_S2, Mode.SCOTTIE_DX,
-        Mode.PD_90, Mode.PD_120, Mode.PD_160,
-        Mode.PD_180, Mode.PD_240, Mode.PD_290,
-        Mode.WRAASE_SC2_120, Mode.WRAASE_SC2_180,
-        Mode.PASOKON_P3, Mode.PASOKON_P5, Mode.PASOKON_P7,
-    ]
+    # Derived from MODE_TABLE, never hand-listed. This list *was* hand-listed
+    # and fell five modes behind the table — martin_m3/m4, scottie_s3/s4 and
+    # pd_50 were never audited. pd_50 turned out to carry the worst instance
+    # of the chroma-clamp bug fixed in PR #64 (MAE 9.63) and the audit had no
+    # idea it existed. A new mode is now audited the moment it is added.
+    modes_in_order = sorted(MODE_TABLE, key=lambda m: m.value)
 
     results: list[Result] = []
     for mode in modes_in_order:

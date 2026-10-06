@@ -703,7 +703,7 @@
 <!-- ── Hero ── -->
 <div class="hero">
   <div>
-    <div class="hero-badge" id="version-badge">Beta · v0.6.9</div>
+    <div class="hero-badge" id="version-badge">Beta · v0.6.14</div>
     <h1>Open-Source<br /><span>SSTV Transceiver</span><br />for Amateur Radio</h1>
     <p>Transmit and receive Slow Scan Television images live from your rig — no external software required. 22 modes, modern Qt 6 GUI, cross-platform.</p>
     <div class="hero-actions">
@@ -804,7 +804,7 @@
         <div class="feature-icon">🎛</div>
         <span class="feature-tag">Rig Control</span>
         <h3>Hamlib, Serial, TCI, and Flex</h3>
-        <p>rigctld TCP client with auto-launch. Direct serial for Icom CI-V, Kenwood, Yaesu, and DTR/RTS PTT. TCI WebSocket for ExpertSDR2/3, AetherSDR, and the SunSDR2 family — one connection carries CAT and audio. FlexRadio 6000-series over the SmartSDR TCP API, no daemon in between. Frequency &amp; S-meter polling at 1 Hz.</p>
+        <p>rigctld TCP client with auto-launch. Direct serial for Icom CI-V, Kenwood, Yaesu, and DTR/RTS PTT. TCI WebSocket for ExpertSDR2/3, AetherSDR, Lyra (Hermes Lite 2), and the SunSDR2 family — one connection carries CAT and audio. FlexRadio 6000-series over the SmartSDR TCP API, no daemon in between. Frequency &amp; S-meter polling at 1 Hz.</p>
       </div>
 
       <div class="feature-card">
@@ -1058,6 +1058,8 @@
           </ul>
           <p class="install-note">
             Extract the zip (or <code>chmod +x</code> the AppImage) and launch — no Python required.
+            Linux needs glibc 2.35+ on x86_64 (Ubuntu 22.04 or newer) and glibc 2.31+ on ARM64
+            (Raspberry Pi OS Bullseye or newer). The AppImage can update itself with AppImageUpdate.
           </p>
 
           <div class="platform-note">

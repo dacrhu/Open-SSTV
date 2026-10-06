@@ -231,6 +231,8 @@ The **status label** shows the detected mode name, VIS code, and decode progress
 
 At the bottom is the **image gallery** — a horizontal strip of thumbnails showing up to 20 recently decoded images, with the newest on the left. Double-click a thumbnail to save it, or right-click for a context menu with "Save As..." and "Copy to Clipboard" options.
 
+Along the right edge of the Receive panel is a slim **audio strip** with three vertical controls: a **TX gain** slider, an **RX gain** slider, and an input-level meter. The two sliders are the same software-gain values found in Settings → Audio → Software Gain — dragging one takes effect immediately, and releasing it saves the value so it persists across restarts and shows up in the Settings dialog. The **input-level meter** is a colour-zoned dBFS bar (green = healthy, yellow = hot, red = clipping) with a slowly falling peak-hold marker; it moves while capture is running and reflects the level *after* the RX gain slider, so you can raise RX gain until the meter sits comfortably in the green without touching red.
+
 ### 6.4 Menu Bar
 
 The **File** menu contains **Settings** (opens the configuration dialog) and **Quit**.
@@ -475,7 +477,8 @@ Select **"Direct Serial (built-in)"** to have Open-SSTV communicate directly wit
 ### 10.4 TCI (ExpertSDR / SunSDR)
 
 TCI is a WebSocket protocol spoken by ExpertSDR2 / ExpertSDR3, the SunSDR2
-family, and the AetherSDR. It is the only backend that carries **both**
+family, the AetherSDR, and [Lyra](https://github.com/N8SDR1/Lyra-SDR-cpp) (a Hermes Lite 2 transceiver). It is the
+only backend that carries **both**
 rig control **and** audio over a single connection — with TCI selected you
 do not need a virtual audio cable or a second sound device.
 
@@ -483,7 +486,11 @@ do not need a virtual audio cable or a second sound device.
 2. **Settings → Radio → Mode: TCI (ExpertSDR2 / SunSDR)**.
 3. Enter the **TCI host** (`127.0.0.1` if the SDR software runs on this
    machine) and **port**.
-4. Click OK, then **Connect Rig**.
+4. Choose the **SSTV mode** for Band Plan tuning. **Voice** keeps the SDR
+   in DIGU / DIGL if it's already there and only changes the frequency.
+   **Data/Pkt** switches it into DIGU / DIGL. **Don't change mode** leaves
+   the mode alone entirely.
+5. Click OK, then **Connect Rig**.
 
 RX audio arrives over the same connection and replaces the sound-card
 input automatically, so the Audio tab's input device is ignored while TCI
@@ -501,7 +508,10 @@ SmartSDR TCP API — no `rigctld` and no virtual serial port in between.
 4. Choose the **Slice** to follow: `0` is slice A, `1` is slice B, and so
    on. The slice must be **active in SmartSDR** — if it isn't, the
    connection test says so rather than silently reading 0.000 MHz.
-5. Click **Test FlexRadio Connection** to confirm, then OK and
+5. Choose the **SSTV mode** for Band Plan tuning, as for TCI above.
+   **Data/Pkt** puts the slice in DIGU / DIGL, and **Voice** keeps it there
+   if it's already in one.
+6. Click **Test FlexRadio Connection** to confirm, then OK and
    **Connect Rig**.
 
 Unlike TCI this is **CAT only** — audio still comes from your sound
@@ -523,7 +533,7 @@ The following radios have been tested or have built-in presets in the settings d
 
 **Via Direct Serial (Yaesu)**: FT-991A, FT-891, FT-710, FTDX10, FTDX101, FT-950.
 
-**Via TCI**: Expert Electronics SunSDR2 family (PRO / DX / MB1) and the AetherSDR, through ExpertSDR2 / ExpertSDR3.
+**Via TCI**: Expert Electronics SunSDR2 family (PRO / DX / MB1) and the AetherSDR, through ExpertSDR2 / ExpertSDR3; and the Hermes Lite 2 / 2+ through [Lyra](https://github.com/N8SDR1/Lyra-SDR-cpp), with Band Plan DIGU / DIGL switching confirmed by its author, N8SDR.
 
 **Via FlexRadio direct**: the 6000 series — FLEX-6300/6400/6500/6600/6700 and the 6400M/6600M — over the SmartSDR TCP API.
 

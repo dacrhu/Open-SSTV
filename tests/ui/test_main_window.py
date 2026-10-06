@@ -100,9 +100,13 @@ def test_central_widget_hosts_tx_and_rx_panels(window: MainWindow) -> None:
     children = central.findChildren(QSplitter)
     assert len(children) >= 1
     splitter = children[0]
-    panels = [splitter.widget(i) for i in range(splitter.count())]
-    assert any(isinstance(p, TxPanel) for p in panels)
-    assert any(isinstance(p, RxPanel) for p in panels)
+    # The RX pane is a wrapper widget (RxPanel + the audio level strip),
+    # so search recursively rather than expecting a direct splitter child.
+    panes = [splitter.widget(i) for i in range(splitter.count())]
+    assert any(isinstance(p, TxPanel) for p in panes)
+    assert any(
+        isinstance(p, RxPanel) or p.findChild(RxPanel) is not None for p in panes
+    )
     assert central.findChild(RadioPanel) is not None
 
 
@@ -787,6 +791,38 @@ class TestRigPollWorkerTune:
         rig.set_mode.assert_called_once_with("USB", 2700)
         assert failures == []
 
+    @pytest.mark.parametrize(("current", "band"), [("DIGU", "USB"), ("DIGL", "LSB")])
+    def test_voice_tune_keeps_sdr_data_mode(self, qapp, current: str, band: str) -> None:
+        """#68, as reported by N8SDR: a TCI / Flex SDR sitting in DIGU must
+        stay in DIGU when a Voice-policy band pick asks for USB.  Only the
+        frequency changes.  Before the fix, mode_family("DIGU") was its own
+        family, so this sent set_mode("USB") and dropped the operator's
+        DIGU bandwidth profile."""
+        worker = self._make_worker()
+        rig = MagicMock()
+        rig.get_freq.return_value = 14_230_000
+        rig.get_mode.return_value = (current, 0)
+        worker.set_rig(rig)
+
+        worker.tune(14_230_000, band, 2700)
+
+        rig.set_freq.assert_called_once_with(14_230_000)
+        rig.set_mode.assert_not_called()
+
+    def test_data_tune_moves_sdr_from_usb_into_digu(self, qapp) -> None:
+        """The other half of #68: with Data/Pkt, an SDR on plain USB is moved
+        into DIGU.  The tune is flagged exact, because DIGU and USB now share
+        a family."""
+        worker = self._make_worker()
+        rig = MagicMock()
+        rig.get_freq.return_value = 14_230_000
+        rig.get_mode.return_value = ("USB", 0)
+        worker.set_rig(rig)
+
+        worker.tune(14_230_000, "DIGU", 2700, True)
+
+        rig.set_mode.assert_called_once_with("DIGU", 2700)
+
     def test_tune_skips_mode_when_family_matches(self, qapp) -> None:
         """User already on a data variant (e.g. Yaesu DATA-U) — same
         family as the target, so set_mode must not be re-sent."""
@@ -799,6 +835,33 @@ class TestRigPollWorkerTune:
         worker.tune(14_230_000, "USB", 2700)
 
         rig.set_freq.assert_called_once_with(14_230_000)
+        rig.set_mode.assert_not_called()
+
+    def test_tune_exact_mode_switches_within_same_family(self, qapp) -> None:
+        """Data/Pkt policy: user is on plain USB, target is PKTUSB — same
+        sideband family, but mode_is_exact means the rig must still be
+        switched into the data mode it was asked for."""
+        worker = self._make_worker()
+        rig = MagicMock()
+        rig.get_freq.return_value = 14_230_000
+        rig.get_mode.return_value = ("USB", 0)
+        worker.set_rig(rig)
+
+        worker.tune(14_230_000, "PKTUSB", 2700, True)
+
+        rig.set_mode.assert_called_once_with("PKTUSB", 2700)
+
+    def test_tune_exact_mode_skips_when_already_on_target(self, qapp) -> None:
+        """mode_is_exact still avoids a redundant set_mode when the rig is
+        already on exactly that mode."""
+        worker = self._make_worker()
+        rig = MagicMock()
+        rig.get_freq.return_value = 14_230_000
+        rig.get_mode.return_value = ("PKTUSB", 0)
+        worker.set_rig(rig)
+
+        worker.tune(14_230_000, "PKTUSB", 2700, True)
+
         rig.set_mode.assert_not_called()
 
     def test_tune_emits_tune_failed_on_freq_readback_mismatch(self, qapp) -> None:
@@ -874,6 +937,69 @@ class TestRigPollWorkerTune:
         assert len(failures) == 1
         rig.set_mode.assert_called_once_with("USB", 2700)
         rig.get_freq.assert_not_called()
+
+
+class TestOnTuneRequestedModePolicy:
+    """``_on_tune_requested`` resolves the band-plan entry's plain USB/LSB
+    literal through ``resolve_tune_mode`` before relaying it to the poll
+    thread — for Direct Serial *and* rigctld connections."""
+
+    def _emit(self, window: MainWindow) -> tuple[str, bool]:
+        seen: list[tuple[str, bool]] = []
+        window._request_tune.connect(
+            lambda _f, mode, _p, exact: seen.append((mode, exact))
+        )
+        window._on_tune_requested(14_230_000, "USB", 2700)
+        assert seen, "_request_tune was not emitted"
+        return seen[0]
+
+    def test_rigctld_data_policy_resolves_to_pktusb_and_flags_exact(
+        self, window: MainWindow
+    ) -> None:
+        from open_sstv.radio.base import RigConnectionMode
+
+        window._config.rig_connection_mode = RigConnectionMode.RIGCTLD.value
+        window._config.rig_tune_mode_policy = "data"
+        assert self._emit(window) == ("PKTUSB", True)
+
+    def test_rigctld_voice_policy_passes_through_not_exact(self, window: MainWindow) -> None:
+        from open_sstv.radio.base import RigConnectionMode
+
+        window._config.rig_connection_mode = RigConnectionMode.RIGCTLD.value
+        window._config.rig_tune_mode_policy = "voice"
+        assert self._emit(window) == ("USB", False)
+
+    def test_rigctld_none_policy_sends_empty_mode(self, window: MainWindow) -> None:
+        from open_sstv.radio.base import RigConnectionMode
+
+        window._config.rig_connection_mode = RigConnectionMode.RIGCTLD.value
+        window._config.rig_tune_mode_policy = "none"
+        assert self._emit(window) == ("", False)
+
+    # #68: TCI and FlexRadio used to skip the policy and always send USB.
+    @pytest.mark.parametrize("conn", ["tci", "flex"])
+    def test_sdr_data_policy_resolves_to_digu_and_flags_exact(
+        self, window: MainWindow, conn: str
+    ) -> None:
+        window._config.rig_connection_mode = conn
+        window._config.rig_tune_mode_policy = "data"
+        assert self._emit(window) == ("DIGU", True)
+
+    @pytest.mark.parametrize("conn", ["tci", "flex"])
+    def test_sdr_voice_policy_passes_through_not_exact(
+        self, window: MainWindow, conn: str
+    ) -> None:
+        window._config.rig_connection_mode = conn
+        window._config.rig_tune_mode_policy = "voice"
+        assert self._emit(window) == ("USB", False)
+
+    @pytest.mark.parametrize("conn", ["tci", "flex"])
+    def test_sdr_none_policy_sends_empty_mode(
+        self, window: MainWindow, conn: str
+    ) -> None:
+        window._config.rig_connection_mode = conn
+        window._config.rig_tune_mode_policy = "none"
+        assert self._emit(window) == ("", False)
 
 
 class TestOnRadioDisconnected:
@@ -1067,7 +1193,7 @@ class TestAudioDeviceLostUI:
     ) -> None:
         """_on_audio_device_lost must post a sticky status-bar message with
         no timeout, so it survives until the user acts."""
-        msg = "Audio device disconnected — replug and click Start to recover"
+        msg = "Audio device disconnected — reconnecting automatically."
         window._on_audio_device_lost(msg)
         assert window.statusBar().currentMessage() == msg
 
@@ -1075,7 +1201,7 @@ class TestAudioDeviceLostUI:
         self, window: MainWindow, qapp
     ) -> None:
         """_on_audio_device_lost must also update the RX panel status label."""
-        msg = "Audio device disconnected — replug and click Start to recover"
+        msg = "Audio device disconnected — reconnecting automatically."
         window._on_audio_device_lost(msg)
         assert window._rx_panel._status.text() == msg
 
@@ -1083,21 +1209,25 @@ class TestAudioDeviceLostUI:
         self, window: MainWindow, qapp
     ) -> None:
         """When stream_error fires before stopped, _on_rx_stopped must
-        re-show the disconnect message, not 'Capture stopped.' / 'Ready'."""
-        msg = "Audio device disconnected — replug and click Start to recover"
+        re-show the disconnect message, not 'Capture stopped.' / 'Ready'.
+
+        Since RX auto-resume (2026-10 audit) the message also carries the
+        retry countdown, so check that it's contained rather than equal."""
+        msg = "Audio device disconnected — reconnecting automatically."
         window._on_audio_device_lost(msg)
         # Now the stopped signal fires (as it would after device-loss stop()).
         window._on_rx_stopped()
 
-        assert window.statusBar().currentMessage() == msg
-        assert window._rx_panel._status.text() == msg
+        for shown in (window.statusBar().currentMessage(), window._rx_panel._status.text()):
+            assert msg in shown
+            assert "Retrying in" in shown
 
     def test_device_lost_flag_cleared_after_rx_stopped(
         self, window: MainWindow, qapp
     ) -> None:
         """_on_rx_stopped must clear _last_rx_disconnect_msg after consuming it
         so subsequent normal stops don't re-show the stale disconnect message."""
-        msg = "Audio device disconnected — replug and click Start to recover"
+        msg = "Audio device disconnected — reconnecting automatically."
         window._on_audio_device_lost(msg)
         window._on_rx_stopped()
 
@@ -1119,7 +1249,7 @@ class TestAudioDeviceLostUI:
     ) -> None:
         """stream_error must be connected to _on_audio_device_lost, NOT
         _on_rx_error, so the message is stored for _on_rx_stopped to use."""
-        msg = "Audio device disconnected — replug and click Start to recover"
+        msg = "Audio device disconnected — reconnecting automatically."
         # Emit stream_error directly on the worker (direct call, synchronous).
         window._audio_worker.stream_error.emit(msg)
         # The stored flag confirms _on_audio_device_lost ran (not _on_rx_error,
@@ -1133,7 +1263,7 @@ class TestAudioDeviceLostUI:
     ) -> None:
         """If stream_error fires before started (race on disconnect during start),
         _on_rx_started must not overwrite the disconnect message in the UI."""
-        msg = "Audio device disconnected — replug and click Start to recover"
+        msg = "Audio device disconnected — reconnecting automatically."
         window._on_audio_device_lost(msg)
         # Simulate the late started arriving after stream_error.
         window._on_rx_started()
@@ -1177,7 +1307,7 @@ class TestAudioDeviceLostUI:
         """RxWorker status_update must be suppressed after device loss."""
         from open_sstv.ui.workers import RX_LISTENING
 
-        disconnect_msg = "Audio device disconnected — replug and click Start to recover"
+        disconnect_msg = "Audio device disconnected — reconnecting automatically."
         window._on_audio_device_lost(disconnect_msg)
         window._on_rx_status_update(RX_LISTENING)
         assert window._rx_panel._status.text() == disconnect_msg
@@ -1704,3 +1834,79 @@ class TestRemoteTxWiring:
         assert spy.call_count == 1
         from open_sstv.core.modes import Mode
         assert spy.call_args[0][1] == Mode.MARTIN_M1
+
+
+class TestAudioLevelStrip:
+    """The always-on TX/RX gain sliders + RX level meter to the right of
+    the RX panel."""
+
+    def test_strip_seeded_from_config(self, window: MainWindow) -> None:
+        strip = window._level_strip
+        assert strip._tx_slider.value() == round(
+            window._config.audio_output_gain * 100
+        )
+        assert strip._rx_slider.value() == round(
+            window._config.audio_input_gain * 100
+        )
+
+    def test_tx_slider_pushes_gain_to_worker(self, window: MainWindow) -> None:
+        window._level_strip._tx_slider.setValue(65)
+        assert window._tx_worker._output_gain == pytest.approx(0.65)
+
+    def test_rx_slider_pushes_gain_to_worker(self, window: MainWindow) -> None:
+        window._level_strip._rx_slider.setValue(140)
+        assert window._rx_worker._input_gain == pytest.approx(1.4)
+
+    def test_slider_release_persists_to_config_and_disk(
+        self, window: MainWindow, qtbot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        saved: list[object] = []
+        monkeypatch.setattr(
+            "open_sstv.ui.main_window.save_config", lambda cfg: saved.append(cfg)
+        )
+        window._level_strip._rx_slider.setValue(75)
+        window._level_strip._rx_slider.sliderReleased.emit()
+        # Config updates synchronously; the disk write is debounced.
+        assert window._config.audio_input_gain == pytest.approx(0.75)
+        qtbot.waitUntil(lambda: bool(saved), timeout=2000)
+        assert saved[-1] is window._config
+
+    def test_pending_gain_write_flushed_on_close(
+        self, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        saved: list[object] = []
+        monkeypatch.setattr(
+            "open_sstv.ui.main_window.save_config", lambda cfg: saved.append(cfg)
+        )
+        window._level_strip._tx_slider.setValue(55)
+        assert window._gain_persist_timer.isActive()
+        window.close()
+        assert saved and saved[-1] is window._config
+        assert window._config.audio_output_gain == pytest.approx(0.55)
+
+    def test_rx_chunk_drives_the_meter(self, window: MainWindow) -> None:
+        chunk = np.full(256, 0.5, dtype=np.float64)
+        window._on_rx_waterfall_chunk(chunk)
+        assert window._level_strip._meter._bar_db == pytest.approx(-6.02, abs=0.1)
+
+    def test_rx_stopped_resets_the_meter(self, window: MainWindow) -> None:
+        window._on_rx_waterfall_chunk(np.full(64, 0.9, dtype=np.float64))
+        window._on_rx_stopped()
+        assert not window._level_strip._meter._timer.isActive()
+
+    def test_apply_config_syncs_strip(self, window: MainWindow) -> None:
+        window._config.audio_output_gain = 0.3
+        window._config.audio_input_gain = 1.7
+        window._config.tx_output_overdrive = False
+        window._apply_config()
+        assert window._level_strip._tx_slider.value() == 30
+        assert window._level_strip._rx_slider.value() == 170
+
+    def test_apply_config_expands_tx_ceiling_for_overdrive(
+        self, window: MainWindow
+    ) -> None:
+        window._config.tx_output_overdrive = True
+        window._config.audio_output_gain = 1.8
+        window._apply_config()
+        assert window._level_strip._tx_slider.maximum() == 200
+        assert window._level_strip._tx_slider.value() == 180

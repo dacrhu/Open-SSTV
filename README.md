@@ -5,9 +5,9 @@
 An open-source, cross-platform SSTV (Slow Scan Television) transceiver for amateur
 radio. Receives and decodes SSTV images live off your radio, and encodes and
 transmits images back, with optional Hamlib, direct serial, or TCI (ExpertSDR2 /
-SunSDR2 / AetherSDR) rig control.
+SunSDR2 / AetherSDR / Lyra) rig control.
 
-**Status: Beta (v0.6.9) — ready for user testing and feedback.** TX and RX paths work
+**Status: Beta (v0.6.14) — ready for user testing and feedback.** TX and RX paths work
 end-to-end across all 22 supported modes, with a built-in QSO logbook (v0.4), an image
 gallery (v0.5), and opt-in remote control from a phone or laptop browser (v0.6). Rig
 control via rigctld or direct serial CAT is functional. Weak-signal decode is usable
@@ -36,7 +36,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history. &nbsp;|&nbsp;
   well-maintained scientific dependencies.
 - **Real radio control** via Hamlib's `rigctld` TCP daemon, direct serial
   (Icom CI-V, Kenwood/Elecraft, Yaesu CAT, DTR/RTS PTT), or TCI WebSocket
-  (ExpertSDR2 / ExpertSDR3 / AetherSDR / SunSDR2) — so any supported radio
+  (ExpertSDR2 / ExpertSDR3 / AetherSDR / SunSDR2 / Lyra) — so any supported radio
   works out of the box without an external daemon.
 - **Decoder written from scratch** because no maintained Python SSTV decoder exists
   on PyPI today. Algorithms mirror the well-known C reference `slowrx`.
@@ -244,7 +244,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history. &nbsp;|&nbsp;
     auto-detected from the radio's own response, no per-model setting needed.
   - **PTT Only (DTR/RTS)** -- simple serial PTT via DTR or RTS line
 - **TCI (v0.3.5)** -- WebSocket-based control for the Expert Electronics
-  SunSDR2 family (ExpertSDR2 / ExpertSDR3) and the AetherSDR. A single
+  SunSDR2 family (ExpertSDR2 / ExpertSDR3), the AetherSDR, and [Lyra](https://github.com/N8SDR1/Lyra-SDR-cpp)
+  (Hermes Lite 2 / 2+; Band Plan DIGU/DIGL confirmed by its author). A single
   `ws://host:port` connection (default `127.0.0.1:40001`) carries both CAT
   control and binary PCM audio, so rig control and RX/TX audio share one
   transport with no virtual audio cables required.
@@ -261,15 +262,21 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history. &nbsp;|&nbsp;
   disabled when no rig is connected or TX is in progress. A rejected
   frequency/mode change (VFO lock, band-edge, an unsupported CAT command)
   is now surfaced as a status-bar message instead of failing silently.
-- **SSTV mode policy (Direct Serial only)** -- Settings → Radio → Direct
-  Serial → "SSTV mode" controls what the Band Plan button sends for the
-  mode half of a tune, mirroring WSJT-X's rig Mode setting: **Voice**
-  (default; sends the band-plan entry's plain USB/LSB/FM, unchanged from
-  before), **Data/Pkt** (asks for the protocol's data-mode variant instead
-  -- e.g. Yaesu `DATA-U`/`DATA-L` -- so SSTV doesn't land on plain USB with
-  the speech processor still engaged; currently mapped for Yaesu CAT only,
-  other protocols fall back to Voice), or **Don't change mode** (frequency
-  only, for operators who already have their data mode set up manually).
+- **SSTV mode policy** -- Settings → Radio → "SSTV mode", in the Direct
+  Serial, rigctld, TCI and FlexRadio sections, controls what the Band Plan
+  button sends for the mode half of a tune. It mirrors WSJT-X's rig Mode
+  setting:
+  - **Voice** (default) sends the band-plan entry's plain USB/LSB/FM. If the
+    radio is already in a data mode on the same sideband (`USB-D`,
+    `DATA-U`, `PKTUSB`, `DIGU`, …), it's left there and only the frequency
+    changes.
+  - **Data/Pkt** asks for the backend's data mode, so SSTV doesn't land on
+    plain USB with the speech processor still engaged: Yaesu CAT
+    `DATA-U`/`DATA-L`, rigctld `PKTUSB`/`PKTLSB`, TCI and FlexRadio
+    `DIGU`/`DIGL`. Icom and Kenwood/Elecraft over Direct Serial fall back to
+    Voice, because their data mode isn't a single CAT command.
+  - **Don't change mode** changes the frequency only, for operators who set
+    their data mode up manually.
 - **Configurable baud rate** -- 4800, 9600, 19200, 38400, 57600, or 115200 baud.
 - **Rig status bar** -- frequency, mode, and S-meter polled at 1 Hz when connected.
   Graceful disconnect: non-modal status bar message, auto-reconnect on next poll.
@@ -316,14 +323,14 @@ All 22 modes support both TX (encode) and RX (decode).
 |------|-----------|----------|--------------|
 | Robot 36 | 320×240 | ~36 s | YCbCr |
 | Martin M1 | 320×256 | ~114 s | RGB |
-| Martin M2 | 160×256 | ~57 s | RGB |
+| Martin M2 | 320×256 | ~58 s | RGB |
 | Martin M3 | 320×128 | ~57 s | RGB |
-| Martin M4 | 160×128 | ~29 s | RGB |
+| Martin M4 | 320×128 | ~29 s | RGB |
 | Scottie S1 | 320×256 | ~110 s | RGB |
-| Scottie S2 | 160×256 | ~71 s | RGB |
+| Scottie S2 | 320×256 | ~71 s | RGB |
 | Scottie DX | 320×256 | ~269 s | RGB |
 | Scottie S3 | 320×128 | ~55 s | RGB |
-| Scottie S4 | 160×128 | ~36 s | RGB |
+| Scottie S4 | 320×128 | ~36 s | RGB |
 | PD-50 | 320×256 | ~50 s | YCbCr |
 | PD-90 | 320×256 | ~90 s | YCbCr |
 | PD-120 | 640×496 | ~126 s | YCbCr |
@@ -468,8 +475,30 @@ clone.
 
 Two formats are published per architecture:
 
-- **`.AppImage`** — single-file, self-contained. `chmod +x open-sstv-*.AppImage && ./open-sstv-*.AppImage`.
+- **`.AppImage`** — single file. `chmod +x Open-SSTV-*.AppImage && ./Open-SSTV-*.AppImage`.
 - **`.zip`** — unpacked onedir bundle. `unzip open-sstv-linux-*.zip && ./open-sstv/open-sstv`.
+
+**Requirements:** glibc 2.35 or newer on x86_64 (Ubuntu 22.04, Debian 12,
+Fedora 36 or later), and glibc 2.31 or newer on ARM64 (Raspberry Pi OS
+Bullseye, Ubuntu 20.04, Debian 11 or later). The ARM64 build supports
+older systems because it's built on Ubuntu 20.04. Doing the same on
+x86_64 would mean shipping an older Qt.
+
+**Updates:** from v0.6.13 the AppImage carries update information, so
+[AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate),
+Gear Lever and similar tools can update it in place, downloading only the
+parts that changed.
+
+Both include PortAudio, the audio library. They use your system's ALSA
+library (`libasound2`) for the audio devices themselves, which is what lets
+PipeWire and PulseAudio devices show up. Every desktop distribution ships
+ALSA. If Open-SSTV reports it missing, install it with
+`sudo apt install libasound2` (Debian/Ubuntu), `sudo dnf install alsa-lib`
+(Fedora), or `sudo pacman -S alsa-lib` (Arch).
+
+> Linux builds up to and including v0.6.10 did **not** include PortAudio. On a
+> system without it, they closed immediately on launch without a message.
+> Install `libportaudio2` to run those versions, or upgrade.
 
 ### Windows
 
@@ -488,6 +517,15 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+On Linux, `pip` can't provide PortAudio. The `sounddevice` package ships
+it inside its macOS and Windows wheels, but not in its Linux one. Install
+it from your distribution before running, and the same applies to
+`pipx install open-sstv`:
+
+- **Debian/Ubuntu:** `sudo apt install libportaudio2`
+- **Fedora:** `sudo dnf install portaudio`
+- **Arch:** `sudo pacman -S portaudio`
 
 You will also need Hamlib's `rigctld` for rigctld-based radio control (not
 required for direct serial or manual PTT):
@@ -580,9 +618,10 @@ with what you tried and what happened.
   does the green/amber match indicator track what you'd expect?
 - **Rig control edge cases**. Mid-session USB unplug; rigctld daemon crash; Icom
   CI-V addresses other than the default 0x94; Kenwood/Yaesu protocol quirks.
-- **TCI rigs** (v0.3.5). If you have an ExpertSDR2/3, AetherSDR, or another
-  TCI-speaking SDR, on-air reports are especially valuable — this path is
-  newly added and has only been validated against one AetherSDR setup.
+- **TCI rigs** (v0.3.5). If you have an ExpertSDR2/3, AetherSDR, Lyra, or
+  another TCI-speaking SDR, on-air reports are especially valuable. This path
+  has been validated against an AetherSDR setup and against Lyra (DIGU/DIGL
+  Band Plan tuning, confirmed by N8SDR).
   Confirm TCI connect, RX audio routing, full SSTV TX, and CW ID over TCI.
 - **FFT waterfall** (v0.3.5). Toggle View → Waterfall and confirm RX traffic
   paints a cool palette and TX audio paints a warm palette during a

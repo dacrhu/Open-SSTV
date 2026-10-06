@@ -198,9 +198,15 @@ def mode_family(mode: str) -> str:
     if not m:
         return ""
     # Explicit aliases for mode strings that don't contain a sideband
-    # substring (K3 DATA-A/DATA-B, PSK-U/L, FT8-U/L on some firmware).
-    _USB_ALIASES = {"DATA-U", "DATA-A", "PSK-U", "FT8-U", "U"}
-    _LSB_ALIASES = {"DATA-L", "DATA-B", "PSK-L", "FT8-L", "L"}
+    # substring (K3 DATA-A/DATA-B, PSK-U/L, FT8-U/L on some firmware, and
+    # the SDR data modes DIGU/DIGL used by TCI servers and FlexRadio).
+    #
+    # DIGU/DIGL were missing until #68.  To this function "DIGU" was its
+    # own family, unlike "USB", so every Voice-policy band pick moved a
+    # TCI or Flex operator out of DIGU and onto plain USB, losing the
+    # bandwidth and audio profile they had set up for it.
+    _USB_ALIASES = {"DATA-U", "DATA-A", "PSK-U", "FT8-U", "DIGU", "U"}
+    _LSB_ALIASES = {"DATA-L", "DATA-B", "PSK-L", "FT8-L", "DIGL", "L"}
     if m in _USB_ALIASES or "USB" in m:
         return "USB"
     if m in _LSB_ALIASES or "LSB" in m:
@@ -210,19 +216,45 @@ def mode_family(mode: str) -> str:
     return m
 
 
+#: Pseudo-protocol key for rigctld in ``DATA_MODE_BY_PROTOCOL``.  rigctld
+#: has no vendor protocol name of its own, but Hamlib's ``PKTUSB`` /
+#: ``PKTLSB`` mode tokens are a *universal* data-mode selector accepted by
+#: the daemon's ``M <mode> <passband>`` command on every backend that has
+#: a data mode — so unlike the direct-serial protocols this mapping is not
+#: vendor-specific.  A backend without a data mode rejects ``M PKTUSB``
+#: with a non-zero ``RPRT``; ``_RigPollWorker.tune()`` surfaces that as a
+#: "tune failed" message rather than silently doing nothing.
+RIGCTLD_PROTOCOL = "rigctld"
+
+#: Pseudo-protocol keys for the two SDR backends.  Both use DIGU / DIGL as
+#: their data-mode names: TCI's spec lists "DIGL, DIGU" among its
+#: modulations (ExpertSDR, Thetis, SunSDR and other TCI servers), and
+#: SmartSDR has DIGU / DIGL slice modes (``radio.flex``).  Neither has a
+#: serial protocol name, so like rigctld they get their own keys.  Added
+#: for #68: before that, a TCI or Flex band-plan tune always sent plain
+#: USB, whatever the SSTV-mode policy said.  TCI DIGU/DIGL was confirmed on
+#: real hardware by N8SDR with Lyra (Hermes Lite 2) on 2026-10-02; the
+#: Flex mapping is still from the SmartSDR spec only.
+TCI_PROTOCOL = "tci"
+FLEX_PROTOCOL = "flex"
+
 #: Per-protocol CAT mode strings for the "data" tune policy, keyed by the
-#: ``rig_serial_protocol`` name (see ``serial_rig.SERIAL_RIG_PROTOCOLS``)
-#: and then by sideband family (``mode_family()`` output).  Only protocols
-#: with a verified single-command data-mode selector are listed here —
-#: ``YaesuRig.set_mode()`` already accepts ``"DATA-U"``/``"DATA-L"``
-#: directly.  Icom's data mode is not a mode-select byte at all (base
-#: sideband plus a separate CI-V ``0x1A 0x06`` "DATA ON" sub-command) and
-#: Kenwood/Elecraft's is model-specific (e.g. the K3 uses a separate ``DT``
-#: sub-command) — both are intentionally left out and fall back to
-#: ``"voice"`` in ``resolve_tune_mode`` rather than guess a wrong CAT
-#: string untested against real hardware.
+#: ``rig_serial_protocol`` name (see ``serial_rig.SERIAL_RIG_PROTOCOLS``),
+#: or ``RIGCTLD_PROTOCOL`` for the Hamlib daemon, and then by sideband
+#: family (``mode_family()`` output).  Only protocols with a verified
+#: single-command data-mode selector are listed here — ``YaesuRig.set_mode()``
+#: already accepts ``"DATA-U"``/``"DATA-L"`` directly, and rigctld accepts
+#: Hamlib's universal ``PKTUSB``/``PKTLSB``.  Icom's data mode is not a
+#: mode-select byte at all (base sideband plus a separate CI-V ``0x1A 0x06``
+#: "DATA ON" sub-command) and Kenwood/Elecraft's is model-specific (e.g. the
+#: K3 uses a separate ``DT`` sub-command) — both are intentionally left out
+#: and fall back to ``"voice"`` in ``resolve_tune_mode`` rather than guess a
+#: wrong CAT string untested against real hardware.
 DATA_MODE_BY_PROTOCOL: dict[str, dict[str, str]] = {
     "Yaesu CAT": {"USB": "DATA-U", "LSB": "DATA-L"},
+    RIGCTLD_PROTOCOL: {"USB": "PKTUSB", "LSB": "PKTLSB"},
+    TCI_PROTOCOL: {"USB": "DIGU", "LSB": "DIGL"},
+    FLEX_PROTOCOL: {"USB": "DIGU", "LSB": "DIGL"},
 }
 
 
@@ -238,11 +270,13 @@ def resolve_tune_mode(rig_mode: str, protocol: str, policy: str) -> str:
     * ``"voice"`` — return *rig_mode* unchanged (today's behavior: the
       band-plan entry's plain ``"USB"``/``"LSB"``/``"FM"`` literal).
     * ``"data"`` — look up *protocol*'s data-mode variant for *rig_mode*'s
-      sideband family in ``DATA_MODE_BY_PROTOCOL``.  ``"FM"`` has no data
-      variant and always passes through unchanged, silently — it's not a
-      missing mapping, there's nothing to map.  A USB/LSB family with no
-      known mapping for *protocol* (Kenwood, Icom, PTT-only, or any
-      unrecognised *protocol* string) falls back to the voice literal —
+      sideband family in ``DATA_MODE_BY_PROTOCOL`` (Yaesu ``DATA-U``/
+      ``DATA-L`` over direct serial, Hamlib ``PKTUSB``/``PKTLSB`` for
+      ``RIGCTLD_PROTOCOL``).  ``"FM"`` has no data variant and always
+      passes through unchanged, silently — it's not a missing mapping,
+      there's nothing to map.  A USB/LSB family with no known mapping for
+      *protocol* (Kenwood, Icom, PTT-only, or any unrecognised *protocol*
+      string) falls back to the voice literal —
       the same value used today, so an unsupported "data" request never
       picks a worse mode than before — but logs a warning, since a user
       who picked "Data/Pkt" and silently got plain USB has no way to tell
@@ -267,7 +301,10 @@ def resolve_tune_mode(rig_mode: str, protocol: str, policy: str) -> str:
 __all__ = [
     "BandEntry",
     "DATA_MODE_BY_PROTOCOL",
+    "FLEX_PROTOCOL",
+    "RIGCTLD_PROTOCOL",
     "SSTV_BAND_PLAN",
+    "TCI_PROTOCOL",
     "mode_family",
     "primary_entry",
     "resolve_tune_mode",

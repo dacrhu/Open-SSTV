@@ -11,6 +11,368 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.14] — 2026-10-01
+
+A stability and reliability release, from a full audit of the project
+(`docs/audit_opus_5.5_v0.6.13.md`). Every fix below was reproduced first and
+has a regression test.
+
+### Fixed
+
+- **Closing Open-SSTV from the system now unkeys the radio.** `kill`,
+  `systemctl stop`, logging out, and Ctrl-C in a terminal were ignored while
+  the app sat idle, so the clean shutdown that drops PTT never ran. If the
+  system then forced the app closed, a radio that was transmitting stayed
+  keyed. Closing the terminal Open-SSTV was started from killed it outright,
+  with the same result. All of these now shut down cleanly.
+- **Quitting mid-transmission drops PTT straight away.** It used to wait
+  behind other shutdown steps, for up to about 30 seconds.
+- **Quitting can no longer crash or hang.** When a background task wouldn't
+  stop in time, shutdown either aborted the process or froze it. It now
+  exits cleanly.
+- **Rig status can no longer show wrong values after a slow reply.**
+  rigctld: a reply that arrived late was read as the answer to the next
+  command, so frequency, mode and PTT could be off until a reconnect, and the
+  rig could even be shown as transmitting when it wasn't. Icom CI-V: a late
+  reply could be taken for the next command's, which once made a refused
+  PTT-off look successful.
+- **A lost FlexRadio or TCI connection is now noticed.** The radio panel kept
+  showing the last frequency and mode after the radio or SDR app went away.
+- **TCI with two receivers** (SunSDR2, ExpertSDR, Lyra): the second
+  receiver's mode no longer overwrites the first's. Band Plan uses that
+  mode to decide whether to keep you in DIGU.
+- **Receiving resumes by itself after an audio device glitch.** A USB audio
+  dropout or re-plug used to stop reception until someone clicked Start. It
+  now retries automatically, sooner at first and then every minute, until
+  the device is back.
+- **A full disk no longer floods the screen with error dialogs.** Each failed
+  auto-save opened its own dialog. Now only the first one does, and the rest
+  go to the status bar. A failed save also no longer leaves a half-written
+  image in the gallery.
+- **Settings and templates survive a power cut.** Saves are now flushed to
+  disk before they replace the old file. A power cut just after a save could
+  previously leave the settings file empty, which resets your callsign,
+  audio devices and rig setup.
+- **ADIF import no longer drops QSOs** from a file without a header when a
+  comment contains the text `<EOH>`.
+- **Opening a logbook from a newer version** no longer keeps the file locked
+  on Windows after Open-SSTV refuses it.
+
+### Documentation
+
+- **Lyra is now listed as a supported TCI SDR.** Lyra is N8SDR's Hermes
+  Lite 2 / 2+ transceiver. Its author confirmed on
+  [#73](https://github.com/bucknova/Open-SSTV/pull/73) that v0.6.13's Band
+  Plan DIGU/DIGL switching works correctly with it. That's the first
+  hardware confirmation of the TCI side of
+  [#68](https://github.com/bucknova/Open-SSTV/issues/68); the FlexRadio side
+  is still built from the SmartSDR specification alone.
+
+### Changed
+
+- The AppImage's AppStream file is now named `….appdata.xml` instead of
+  `….metainfo.xml`. The AppImage catalog reads our summary and
+  description, and runs its `appdir-lint` check, only for the older
+  `.appdata.xml` name, so with the new name it shows our description on the
+  listing page and its "No appdata file present" warning goes away.
+  AppStream still accepts the name. The screenshot was already picked up
+  under either name.
+
+---
+
+## [0.6.13] — 2026-10-01
+
+Two fixes from user reports, plus the polish the AppImage catalog asked for
+when it listed us.
+
+- **TCI and FlexRadio users:** Band Plan tuning no longer switches your SDR
+  out of DIGU / DIGL, and *SSTV mode → Data/Pkt* now selects them. Reported
+  by N8SDR in [#68](https://github.com/bucknova/Open-SSTV/issues/68).
+- **Everyone:** the "new version available" notice no longer disappears
+  after the first launch ([#69](https://github.com/bucknova/Open-SSTV/issues/69)).
+- **Linux:** the AppImage can now update itself. The ARM64 build runs on
+  Raspberry Pi OS Bullseye, Ubuntu 20.04 and Debian 11. The icon is
+  properly square.
+
+### Fixed
+
+- **Band Plan tuning no longer knocks TCI and FlexRadio SDRs out of DIGU /
+  DIGL.** Reported by N8SDR in
+  [#68](https://github.com/bucknova/Open-SSTV/issues/68): every frequency
+  pick switched his SDR from DIGU to plain USB, losing the bandwidth and
+  audio profile he keeps on DIGU. Two bugs combined:
+  - Tuning is meant to leave your mode alone when you're already on the
+    right sideband. It recognised `USB-D`, `PKTUSB`, `DATA-U` and similar,
+    but not `DIGU`/`DIGL`, the names TCI servers and SmartSDR use. So it
+    switched you every time, even on the default *Voice* setting.
+  - The *SSTV mode → Data/Pkt* setting was never consulted for TCI or
+    FlexRadio connections, which always got plain USB. The setting wasn't
+    even shown in their sections of Settings → Radio.
+
+  Both are fixed. *Voice* now keeps DIGU / DIGL and only changes the
+  frequency. *Data/Pkt* selects DIGU / DIGL, and the setting appears in the
+  TCI and FlexRadio sections. The DIGU / DIGL names come from the TCI and
+  SmartSDR specifications.
+- **The "new version available" notice no longer disappears after the first
+  launch.** Prompted by
+  [#69](https://github.com/bucknova/Open-SSTV/issues/69). To stay inside
+  GitHub's rate limit, the update check runs at most once every 6 hours, but
+  it only remembered *when* it last checked, not *what* it found. The link
+  showed on one launch, and every launch in the next 6 hours showed
+  nothing. The check now remembers the latest release, so the notice stays
+  until you update.
+
+### Changed
+
+- **The Linux ARM64 build now runs on older systems: Raspberry Pi OS
+  Bullseye, Ubuntu 20.04 and Debian 11.** It's built on Ubuntu 20.04, so it
+  needs glibc 2.31 rather than 2.35. Qt doesn't change: it's PySide6
+  6.8.0.2 either way, because PySide6's newer ARM64 releases need glibc
+  2.39. The x86_64 build stays on glibc 2.35, because supporting older
+  systems there would mean shipping Qt 6.9 instead of 6.11.
+- **The AppImage can update itself.** It now carries update information,
+  and each release publishes a `.zsync` file next to it, so AppImageUpdate,
+  Gear Lever and similar tools can update Open-SSTV in place, downloading
+  only what changed. The AppImage catalog asked for this when it listed us.
+- **A proper Linux icon and app metadata.** The icon was 775 × 779 pixels,
+  and launchers expect square icons; it's now 512 × 512. The AppImage
+  includes AppStream metadata, which software centres and the AppImage
+  catalog read, with the main-window screenshot from this repository.
+
+### Internal
+
+- One list of host-only libraries, `packaging/linux/host-libs.txt`, is read
+  by both the PyInstaller spec and the release smoke test. It now covers
+  the relevant part of the AppImage excludelist, including `libstdc++` and
+  the GL dispatch libraries.
+- A Linux build without Qt's X11 plugin now fails instead of shipping an
+  app that can't open a window. The smoke test also checks the update
+  information, the `.zsync`, the AppStream metadata, the icon size, and
+  the glibc floor, which on ARM64 must stay at 2.31 or below.
+
+---
+
+## [0.6.12] — 2026-09-29
+
+A Linux fix, finishing the job v0.6.11 started. v0.6.11 stopped the AppImage
+and zip crashing without PortAudio. On desktops without Qt's X11
+libraries, they still closed before their window appeared. This release
+bundles those libraries too. Every Linux build is now tested before release
+the way the AppImage catalog tests it: under a real X server, on a host
+missing the libraries the bundle should provide, and it has to show its
+window.
+
+### Fixed
+
+- **The Linux AppImage and zip now open their window on desktops without
+  Qt's X11 libraries.** v0.6.11 fixed the PortAudio crash, and the AppImage
+  catalog's retest
+  ([AppImage/appimage.github.io#7563](https://github.com/AppImage/appimage.github.io/pull/7563))
+  then got one step further. The app started, and then closed when Qt tried
+  to open a window: `libqxcb.so cannot load: libxkbcommon-x11.so.0: cannot
+  open shared object file`. PySide6 doesn't ship the libraries Qt's X11
+  plugin needs, and the build machine didn't have them, so they were never
+  bundled. They are now. Real desktops are affected as well as the catalog:
+  `libxcb-cursor0`, required since Qt 6.5, isn't a default install on
+  Ubuntu 22.04.
+
+  The core X, GL and font libraries (`libxcb`, `libX11`, `libEGL`, `libGL`,
+  `fontconfig`, `freetype`) are now left to the host, as the AppImage
+  project's excludelist requires. A bundled older copy breaks the host's
+  graphics driver on newer distributions.
+
+### Internal
+
+- The Linux release smoke test now runs the app under a real X server, as
+  the catalog does, and requires a window. The previous version used Qt's
+  `offscreen` platform, which never loads the X11 plugin, and that's how
+  v0.6.11 passed it. The test also removes the Qt X11 libraries from the
+  host so the bundle must supply them, and checks that Qt's X11 plugin
+  resolves every library it links.
+
+---
+
+## [0.6.11] — 2026-09-29
+
+A fix release. Three things were quietly wrong, and each affected everyone
+using the feature concerned:
+
+- **Linux users:** the AppImage and zip now start on a system without
+  PortAudio installed. Before, they closed without any message. If a Linux
+  build "did nothing" when you launched it, this was why.
+- **PD-mode users:** saturated yellows, greens and cyans no longer come back
+  washed out in images decoded from WAV files.
+- **Martin M2 / M4 and Scottie S2 / S4 users:** pictures keep their
+  landscape shape instead of being squeezed into a portrait frame. Reported
+  by [@cheyong007](https://github.com/cheyong007) in
+  [#65](https://github.com/bucknova/Open-SSTV/issues/65).
+
+### Fixed
+
+- **The Linux AppImage and zip closed immediately on launch on any system
+  without PortAudio installed.** Found when the AppImage catalog's bot
+  started the v0.6.10 AppImage in a clean environment
+  ([AppImage/appimage.github.io#7563](https://github.com/AppImage/appimage.github.io/pull/7563)):
+  `OSError: PortAudio library not found`, before any window appeared. The
+  `sounddevice` package bundles PortAudio in its macOS and Windows wheels
+  but has no Linux wheel with the library inside, so the build had nothing
+  to copy. The PyInstaller spec's comment claimed otherwise. The build never
+  installed PortAudio, while the test workflow always had, so CI never
+  exercised the missing-library case. Every Linux release through v0.6.10
+  was affected. It worked only on systems where some other package had
+  already installed `libportaudio2`.
+
+  The Linux builds now compile PortAudio 19.7.0 from the pinned official
+  source (ALSA only) and bundle it. A PyInstaller runtime hook points
+  `sounddevice` at the bundled copy, because bundling alone doesn't help:
+  PyInstaller doesn't redirect `ctypes.util.find_library` on Linux, so
+  `sounddevice` would still ask only the host. ALSA and JACK stay host
+  libraries, following the AppImage project's excludelist: a bundled
+  `libasound` can't find the host's PipeWire and PulseAudio plugins, and
+  Ubuntu's own PortAudio package is avoided because it links `libjack`.
+
+- **An audio-library failure at startup now shows a dialog instead of
+  nothing.** `app.main` caught `ImportError` around the main-window import,
+  but PortAudio fails with `OSError`, so the error escaped as a traceback
+  on stderr. That is invisible to anyone who launched from a desktop icon.
+  It now shows advice that depends on what's actually missing: ALSA for the
+  bundled builds, PortAudio for pip installs, and a bug report if a bundled
+  build lost its own PortAudio. The same guard's "missing dependency"
+  message named the package `sstv-app`; it is `open-sstv`.
+
+- **PD images decoded from a WAV file lost every saturated colour.** All
+  seven PD modes were affected, PD-50 worst. The batch decoder's chroma
+  sampler replaced any chroma value under 15% of the signalling band (byte
+  38) with neutral grey. Chroma is coded 0-255 *around* a neutral 128, so a
+  low value is a fully saturated pixel, not a nearly-grey one — the clamp
+  erased exactly the most colourful part of every frame. Saturated yellows,
+  cyans and greens came back pale and washed out. The clamp was written to
+  suppress a Robot 36 edge artifact, but Robot 36 moved to its own
+  slowrx-derived sampler long ago, so in practice it only ever reached the
+  PD family.
+
+  Mean absolute pixel error over the round-trip audit, before → after:
+  PD-50 9.63 → 3.03, PD-90 9.43 → 2.83, PD-120 9.28 → 2.81,
+  PD-160 9.23 → 2.66, PD-180 9.21 → 2.72, PD-240 9.18 → 2.68,
+  PD-290 9.15 → 2.67. Every non-PD mode decodes bit-for-bit as before.
+- **Fully saturated chroma came back speckled with grey, live and from
+  file.** A byte-0 chroma scan transmits at exactly 1500 Hz — the bottom of
+  the signalling band — so demodulator jitter puts about half the readings a
+  fraction of a hertz below it. Both decoders treated any sub-1500 Hz chroma
+  reading as unusable and substituted neutral 128, salting large saturated
+  areas with grey pixels at roughly 50%. Such a reading is now clamped to
+  byte 0; genuine out-of-band leakage is still rejected, by frequency.
+
+- **Martin M2 / M4 and Scottie S2 / S4 transmitted and decoded at half the
+  correct width, squeezing every landscape picture into a portrait frame.**
+  Reported by [@cheyong007](https://github.com/cheyong007) in
+  [#65](https://github.com/bucknova/Open-SSTV/issues/65). The mode table
+  carried these four as 160 px wide. They are 320, like every other mode we
+  ship: M2 and S2 halve the *pixel dwell time*, not the pixel count — M2 runs
+  320 columns at 0.2288 ms each against M1's 320 at 0.4576 ms, and S2 runs 320
+  at 0.2752 ms against S1's 0.4320 ms. They are narrower-*bandwidth* versions
+  of the same frame, which is why every published mode table and every other
+  decoder (slowrx, QSSTV, MMSSTV) lists them as 320×256 and 320×128.
+
+  | mode | was | now | on air |
+  |---|---|---|---|
+  | Martin M2 | 160×256 | 320×256 | 58 s (unchanged) |
+  | Martin M4 | 160×128 | 320×128 | 29 s (unchanged) |
+  | Scottie S2 | 160×256 | 320×256 | 71 s (unchanged) |
+  | Scottie S4 | 160×128 | 320×128 | 36 s (unchanged) |
+
+  The bad width came from upstream PySSTV, which sets `WIDTH = 160` on its
+  `MartinM2` and `ScottieS2` classes; `core.encoder` now overrides it. Because
+  PySSTV derives pixel dwell as `SCAN / WIDTH`, widening the frame halves the
+  dwell and leaves the on-air line period byte-for-byte identical — the fix
+  costs nothing in transmission time and the 320 columns now carry 320
+  distinct values instead of 160 duplicated pairs. Receive-side, the decoders
+  were always driven from the mode table, so correcting the table was enough.
+
+  Three consequences for anyone who noticed the old behaviour: pictures no
+  longer arrive stretched, the TX crop box for these four modes is landscape
+  instead of portrait, and the "aspect mismatch — image will be stretched"
+  warning stops firing on a normal 4:3 photo sent in M2 or S2.
+
+### Internal
+
+- The Linux release build now fails instead of shipping a broken bundle.
+  The spec aborts if no `libportaudio.so*` made it in, where before the
+  hooks-contrib hook printed a warning nobody read. A new smoke test checks
+  that the bundled PortAudio links ALSA and not JACK, and that neither
+  host-only library was bundled. It then **deletes the build machine's
+  PortAudio**, since that copy would hide a broken bundle the way
+  `test.yml`'s did, and launches both the onedir build and the AppImage
+  headless. Either one exiting within 20 s fails the build. This is the
+  test the AppImage catalog ran.
+- README: the Linux install section documents the ALSA dependency and the
+  `libportaudio2` requirement for pip and pipx installs. It also no longer
+  calls the AppImage "self-contained", and its example command uses the
+  real asset name: `Open-SSTV-*.AppImage`, not `open-sstv-*`, which a
+  case-sensitive shell wouldn't match.
+
+- `scripts/roundtrip_all_modes.py` audits every mode in `MODE_TABLE`
+  instead of a hand-written list that had fallen five modes behind it —
+  Martin M3/M4, Scottie S3/S4 and PD-50 were never covered. PD-50 carried
+  the worst instance of the chroma bug above and the audit could not see it.
+- The batch and incremental decoders' chroma samplers were separate copies
+  that had silently drifted apart — the fix above landed in the incremental
+  one in v0.1.13 and never reached the batch one. They now share the reject
+  threshold from `core.demod`, and a test sweeps both across the chroma range
+  and requires byte-for-byte agreement.
+
+- The remote page's transmit-mode picker no longer hard-codes frame
+  dimensions. `render_page` fills `w`/`h` from `MODE_TABLE` at request time,
+  so a mode-table correction reaches the browser crop box without a second
+  edit — that duplicate list was carrying 160×256 for M2 and S2 and was one
+  of the surfaces that made #65 visible. The curated seven-mode order and the
+  display labels stay hand-written; only the protocol numbers are derived.
+- New regression guards in `tests/core/test_new_modes.py`: the four modes are
+  pinned at 320 px, `MODE_TABLE` is cross-checked against every PySSTV
+  encoder class's `WIDTH`/`HEIGHT` (the drift that let a 160 px M2 survive
+  eight minor releases went unnoticed because TX sized from the class and RX
+  sized from the table, and nothing compared them), the derived Martin channel
+  scan is pinned to `320 × dwell`, and the four durations are pinned to their
+  published figures so a future "fix" cannot rescale `SCAN` instead.
+
+---
+
+## [0.6.10] — 2026-09-07
+
+Every user-facing change in this release was contributed by
+[@dacrhu](https://github.com/dacrhu).
+
+### Fixed
+
+- **The "SSTV mode → Data/Pkt" setting now actually switches the radio.**
+  Added in v0.6.8 for Direct Serial, it resolved the right data mode
+  (`DATA-U` on Yaesu) and then never sent it: Band Plan tuning skips the mode
+  change when the current mode's *sideband family* matches the target's — a
+  deliberate guard so a Voice tune doesn't clobber a data mode you dialled in
+  yourself — and `DATA-U`, `PKTUSB` and `USB` are all the same family. The
+  setting appeared in Settings, the tooltip explained it, and nothing
+  happened. If you tried it and concluded your rig didn't support it, that
+  was us. A tune that genuinely resolved a data mode now compares the whole
+  mode string and switches unless the radio is already on it; Voice tuning is
+  unchanged and still preserves a data mode you selected yourself.
+
+### Added
+
+- **rigctld connections honour the SSTV mode policy too.** The Data/Pkt
+  setting was Direct Serial only; rigctld always sent plain USB/LSB. It now
+  uses Hamlib's universal `PKTUSB`/`PKTLSB`, which every backend with a data
+  mode accepts — so unlike a single vendor's CAT commands, this works for any
+  rig Hamlib supports. A rig without a data mode rejects it and the existing
+  "tune failed" message says so.
+- **Audio level strip on the Receive panel.** A slim always-visible column
+  with TX and RX gain sliders and an input level meter, so gain can be set
+  and the incoming level watched without opening Settings. The meter is a
+  colour-zoned dBFS bar with a slow falling peak hold, fed from what the
+  decoder actually sees (post input gain). It stays in sync with Settings
+  both ways, and gain changes are written to disk once the slider settles.
+
+---
+
 ## [0.6.9] — 2026-09-02
 
 ### Fixed
